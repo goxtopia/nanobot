@@ -47,7 +47,7 @@ pixelart ./input/ ./output/ --palette 32 --dither atkinson --pixel-size 6 --form
 ### Options:
 - `--palette`: Number of colors to use (Choices: 2, 4, 8, 16, 32, 64, 128, 256. Default: 16).
 - `--dither`: The dithering method (`none`, `floyd-steinberg`, `atkinson`. Default: `floyd-steinberg`).
-- `--pixel-size`: Block size/scaling factor (Default: 4).
+- `--pixel-size`: Block size/scaling factor (Integer or `"auto"`). Use `"auto"` to automatically calculate a target scaling factor based on your image's resolution to try and reach ~128 internal "pixels" across the shortest dimension. (Default: `"auto"`).
 - `--format`: Set the output format explicitly (`PNG`, `JPEG`, etc.).
 - `--workers`: Limit the number of parallel jobs for batch processing.
 
@@ -64,7 +64,7 @@ process_image(
     output_path="pixel_art_output.png",
     palette_size=16,
     dither_method="atkinson",
-    pixel_size=4
+    pixel_size="auto"
 )
 
 # Convert a batch of images in parallel

@@ -38,9 +38,9 @@ def main():
 
     parser.add_argument(
         "--pixel-size",
-        type=int,
-        default=4,
-        help="Pixelation scaling factor (default: 4)."
+        type=str,
+        default="auto",
+        help="Pixelation scaling factor as an integer, or 'auto' to automatically compute it based on image resolution (default: 'auto')."
     )
 
     parser.add_argument(

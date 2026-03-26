@@ -68,6 +68,24 @@ def test_process_image(temp_dir):
     assert res.startswith("Success")
     assert out_path.exists()
 
+def test_process_image_auto_pixel_size(temp_dir):
+    _, output_dir, img_path = temp_dir
+    out_path = output_dir / "proc_auto.png"
+    # test "auto" pixel size on a 100x100 image which should resolve to 1
+    res = process_image(str(img_path), str(out_path), palette_size=16, dither_method="none", pixel_size="auto")
+    assert res.startswith("Success")
+    assert out_path.exists()
+
+    # Check what happens on a larger image
+    large_img = Image.new("RGB", (1000, 1000), color="blue")
+    large_img_path = output_dir / "large.png"
+    large_img.save(large_img_path)
+    out_large_path = output_dir / "large_proc.png"
+
+    res = process_image(str(large_img_path), str(out_large_path), palette_size=16, dither_method="none", pixel_size="auto")
+    assert res.startswith("Success")
+    assert out_large_path.exists()
+
 def test_process_batch(temp_dir):
     input_dir, output_dir, _ = temp_dir
     # Create another image

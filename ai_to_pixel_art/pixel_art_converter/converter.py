@@ -144,12 +144,28 @@ def apply_atkinson(img: Image.Image, palette_img: Image.Image) -> Image.Image:
     out_img.putdata(flat_data)
     return out_img
 
+from typing import Optional, Union
+
+def calculate_auto_pixel_size(img: Image.Image, target_pixels: int = 128) -> int:
+    """
+    Calculate an appropriate pixel-size scaling factor based on the shortest side
+    of the image to achieve roughly `target_pixels` across that dimension.
+    """
+    width, height = img.size
+    shortest_side = min(width, height)
+
+    if shortest_side <= target_pixels:
+        return 1
+
+    # Calculate the scaling factor
+    return max(1, shortest_side // target_pixels)
+
 def process_image(
     input_path: str,
     output_path: str,
     palette_size: int = 16,
     dither_method: str = "floyd-steinberg",
-    pixel_size: int = 4,
+    pixel_size: Union[int, str] = "auto",
     output_format: Optional[str] = None
 ) -> str:
     """
@@ -158,8 +174,18 @@ def process_image(
     try:
         img = load_image(input_path)
 
+        # Calculate auto pixel size if requested
+        actual_pixel_size = pixel_size
+        if str(pixel_size).lower() == "auto":
+            actual_pixel_size = calculate_auto_pixel_size(img)
+        else:
+            try:
+                actual_pixel_size = int(pixel_size)
+            except ValueError:
+                return f"Error processing {input_path}: Invalid pixel_size '{pixel_size}'"
+
         # 1. Scale image to create pixelated effect
-        pixelated = scale_image(img, pixel_size)
+        pixelated = scale_image(img, actual_pixel_size)
 
         # 2. Get a target palette (no dithering yet)
         palette_img = reduce_palette(pixelated, palette_size)
@@ -188,7 +214,7 @@ def process_batch(
     output_dir: str,
     palette_size: int = 16,
     dither_method: str = "floyd-steinberg",
-    pixel_size: int = 4,
+    pixel_size: Union[int, str] = "auto",
     output_format: Optional[str] = None,
     max_workers: Optional[int] = None
 ):
