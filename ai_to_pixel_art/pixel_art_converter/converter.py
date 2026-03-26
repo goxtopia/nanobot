@@ -1,12 +1,15 @@
 import os
+import math
 import concurrent.futures
+from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 from PIL import Image
 
 def load_image(filepath: str) -> Image.Image:
     """Load an image from the specified filepath."""
-    return Image.open(filepath).convert("RGB")
+    with Image.open(filepath) as img:
+        return img.convert("RGB")
 
 def save_image(img: Image.Image, filepath: str, format: str = None) -> None:
     """Save an image to the specified filepath."""
@@ -19,10 +22,8 @@ def save_image(img: Image.Image, filepath: str, format: str = None) -> None:
             format = 'PNG'
     img.save(filepath, format=format)
 
-def scale_image(img: Image.Image, pixel_size: int) -> Image.Image:
-    """
-    Scale the image down and then back up to create a pixelated effect.
-    """
+def scale_down(img: Image.Image, pixel_size: int) -> Image.Image:
+    """Scale the image down to create the internal pixel grid."""
     if pixel_size <= 1:
         return img
 
@@ -30,12 +31,22 @@ def scale_image(img: Image.Image, pixel_size: int) -> Image.Image:
     new_width = width // pixel_size
     new_height = height // pixel_size
 
-    # Scale down
-    small_img = img.resize((new_width, new_height), Image.Resampling.BILINEAR)
+    return img.resize((new_width, new_height), Image.Resampling.BILINEAR)
 
-    # Scale back up using nearest neighbor to keep it blocky
-    pixelated_img = small_img.resize((width, height), Image.Resampling.NEAREST)
-    return pixelated_img
+def scale_up(img: Image.Image, target_size: tuple) -> Image.Image:
+    """Scale the image back up using nearest neighbor to keep it blocky."""
+    return img.resize(target_size, Image.Resampling.NEAREST)
+
+def scale_image(img: Image.Image, pixel_size: int) -> Image.Image:
+    """
+    Scale the image down and then back up to create a pixelated effect.
+    (Kept for backwards compatibility in tests).
+    """
+    if pixel_size <= 1:
+        return img
+
+    small_img = scale_down(img, pixel_size)
+    return scale_up(small_img, img.size)
 
 def reduce_palette(img: Image.Image, num_colors: int) -> Image.Image:
     """
@@ -144,20 +155,81 @@ def apply_atkinson(img: Image.Image, palette_img: Image.Image) -> Image.Image:
     out_img.putdata(flat_data)
     return out_img
 
-from typing import Optional, Union
-
 def calculate_auto_pixel_size(img: Image.Image, target_pixels: int = 128) -> int:
     """
-    Calculate an appropriate pixel-size scaling factor based on the shortest side
-    of the image to achieve roughly `target_pixels` across that dimension.
+    Attempt to heuristically calculate the pixel-size scaling factor by analyzing
+    run-lengths of similar colors across the image.
+    If a dominant block size is found, it is used. Otherwise, it falls back to
+    targeting roughly `target_pixels` across the shortest dimension.
     """
     width, height = img.size
-    shortest_side = min(width, height)
 
+    # We will sample a few rows and columns to find run-lengths
+    # To avoid being too slow, we just sample lines across the image
+    img_rgb = img.convert("RGB")
+    pixels = img_rgb.load()
+
+    run_lengths = []
+
+    def color_distance(c1, c2):
+        return math.sqrt((c1[0]-c2[0])**2 + (c1[1]-c2[1])**2 + (c1[2]-c2[2])**2)
+
+    tolerance = 15.0 # Tolerance for color similarity
+
+    # Sample horizontal rows
+    num_samples = min(20, height)
+    step = height // num_samples if num_samples > 0 else 1
+    for y in range(0, height, step):
+        current_run = 1
+        last_color = pixels[0, y]
+        for x in range(1, width):
+            color = pixels[x, y]
+            if color_distance(color, last_color) < tolerance:
+                current_run += 1
+            else:
+                if current_run > 1:
+                    run_lengths.append(current_run)
+                current_run = 1
+                last_color = color
+        if current_run > 1:
+            run_lengths.append(current_run)
+
+    # Sample vertical columns
+    num_samples = min(20, width)
+    step = width // num_samples if num_samples > 0 else 1
+    for x in range(0, width, step):
+        current_run = 1
+        last_color = pixels[x, 0]
+        for y in range(1, height):
+            color = pixels[x, y]
+            if color_distance(color, last_color) < tolerance:
+                current_run += 1
+            else:
+                if current_run > 1:
+                    run_lengths.append(current_run)
+                current_run = 1
+                last_color = color
+        if current_run > 1:
+            run_lengths.append(current_run)
+
+    # Analyze run lengths
+    # We ignore very large runs (like empty sky) and very small runs (noise)
+    # We are looking for the common "block" size of an already pixelated AI image
+    valid_runs = [r for r in run_lengths if 1 < r < (min(width, height) // 4)]
+
+    if valid_runs:
+        # Find the most common run length
+        counter = Counter(valid_runs)
+        most_common_run, count = counter.most_common(1)[0]
+
+        # Only trust it if it appears frequently enough
+        if count > len(valid_runs) * 0.05: # At least 5% of all valid runs
+             return most_common_run
+
+    # Fallback to the default ratio logic if no clear pixel size was found
+    shortest_side = min(width, height)
     if shortest_side <= target_pixels:
         return 1
-
-    # Calculate the scaling factor
     return max(1, shortest_side // target_pixels)
 
 def process_image(
@@ -173,6 +245,7 @@ def process_image(
     """
     try:
         img = load_image(input_path)
+        original_size = img.size
 
         # Calculate auto pixel size if requested
         actual_pixel_size = pixel_size
@@ -184,21 +257,24 @@ def process_image(
             except ValueError:
                 return f"Error processing {input_path}: Invalid pixel_size '{pixel_size}'"
 
-        # 1. Scale image to create pixelated effect
-        pixelated = scale_image(img, actual_pixel_size)
+        # 1. Scale down to actual "pixels"
+        small_img = scale_down(img, actual_pixel_size)
 
-        # 2. Get a target palette (no dithering yet)
-        palette_img = reduce_palette(pixelated, palette_size)
+        # 2. Get a target palette (no dithering yet) from the small image
+        palette_img = reduce_palette(small_img, palette_size)
 
-        # 3. Apply dithering
+        # 3. Apply dithering on the small image for correctness and speed
         if dither_method == "none":
-            final_img = palette_img.convert("RGB")
+            dithered_img = palette_img.convert("RGB")
         elif dither_method == "floyd-steinberg":
-            final_img = apply_floyd_steinberg(pixelated, palette_img)
+            dithered_img = apply_floyd_steinberg(small_img, palette_img)
         elif dither_method == "atkinson":
-            final_img = apply_atkinson(pixelated, palette_img)
+            dithered_img = apply_atkinson(small_img, palette_img)
         else:
             raise ValueError(f"Unknown dither method: {dither_method}")
+
+        # 4. Scale back up using nearest neighbor
+        final_img = scale_up(dithered_img, original_size)
 
         # Ensure output directory exists
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
