@@ -122,6 +122,12 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class RSSNewsConfig(Base):
+    """RSS News tool configuration."""
+
+    rsshub_base_url: str = "https://feeds.bbci.co.uk/news/rss.xml"
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -145,6 +151,7 @@ class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    rss_news: RSSNewsConfig = Field(default_factory=RSSNewsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
